@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Question": {
+      "title": "Question",
+      "description": "A single multiple choice question inside a quiz",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "questionText": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "correctIndex": { "type": "number" },
+        "explanation": { "type": "string" },
+        "image": { "type": "string" },
+        "optionImages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["id", "questionText", "options", "correctIndex", "explanation"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "An interactive digital quiz designed by a teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "questions": {
+          "type": "array",
+          "items": { "$ref": "#/entities/Question" }
+        },
+        "durationMinutes": { "type": "number" },
+        "showAnswersAfterCompletion": { "type": "boolean" }
+      },
+      "required": ["id", "code", "title", "subject", "grade", "description", "createdAt", "questions"]
+    },
+    "StudentSubmission": {
+      "title": "Student Submission",
+      "description": "A student's compiled exam results and metadata when completing a quiz",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "quizId": { "type": "string" },
+        "quizCode": { "type": "string" },
+        "quizTitle": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "answers": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "score": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "totalCount": { "type": "number" },
+        "submittedAt": { "type": "string" },
+        "durationSeconds": { "type": "number" }
+      },
+      "required": ["id", "quizId", "quizCode", "quizTitle", "studentName", "studentClass", "answers", "score", "correctCount", "totalCount", "submittedAt", "durationSeconds"]
+    }
+  },
+  "firestore": {
+    "/quizzes/{quizId}": {
+      "schema": "Quiz",
+      "description": "All interactive digital quizzes created"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "StudentSubmission",
+      "description": "All exam submissions completed by students"
+    }
+  }
+}

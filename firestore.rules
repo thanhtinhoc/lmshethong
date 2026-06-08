@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Quizzes collection
+    match /quizzes/{quizId} {
+      allow read: if true; // Any student can read a quiz if they have the code
+      
+      // Let's validate the quiz schema on written documents
+      allow create, update: if request.resource.data.id is string
+        && request.resource.data.code is string
+        && request.resource.data.title is string
+        && request.resource.data.questions is list;
+        
+      allow delete: if true; 
+    }
+
+    // Submissions collection
+    match /submissions/{submissionId} {
+      allow read: if true; // Allow teachers and students to fetch submissions (reports)
+      
+      // Validate submitted data structure
+      allow create, update: if request.resource.data.id is string
+        && request.resource.data.quizId is string
+        && request.resource.data.studentName is string
+        && request.resource.data.studentClass is string
+        && request.resource.data.score is number;
+        
+      allow delete: if true;
+    }
+  }
+}

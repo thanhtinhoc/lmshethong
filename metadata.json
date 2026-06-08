@@ -1,0 +1,6 @@
+{
+  "name": "LMS Ôn Tập Trắc Nghiệm",
+  "description": "Hệ thống ôn tập và kiểm tra trắc nghiệm dành cho giáo viên và học sinh với chức năng tạo đề, phóng to hình ảnh, và báo cáo kết quả chi tiết.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
