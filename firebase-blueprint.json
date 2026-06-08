@@ -38,7 +38,8 @@
           "items": { "$ref": "#/entities/Question" }
         },
         "durationMinutes": { "type": "number" },
-        "showAnswersAfterCompletion": { "type": "boolean" }
+        "showAnswersAfterCompletion": { "type": "boolean" },
+        "teacherEmail": { "type": "string" }
       },
       "required": ["id", "code", "title", "subject", "grade", "description", "createdAt", "questions"]
     },

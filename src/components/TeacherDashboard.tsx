@@ -531,7 +531,8 @@ D. 11
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
         questions: draftQuestions,
         durationMinutes: parsedDuration,
-        showAnswersAfterCompletion: showAnswersAfterCompletion
+        showAnswersAfterCompletion: showAnswersAfterCompletion,
+        teacherEmail: existing?.teacherEmail || gmailEmail || ""
       };
       onUpdateQuiz(updatedQuiz);
       alert(`Đã cập nhật thành công đề kiểm tra: ${updatedQuiz.title}!`);
@@ -546,7 +547,8 @@ D. 11
         createdAt: new Date().toISOString(),
         questions: draftQuestions,
         durationMinutes: parsedDuration,
-        showAnswersAfterCompletion: showAnswersAfterCompletion
+        showAnswersAfterCompletion: showAnswersAfterCompletion,
+        teacherEmail: gmailEmail || ""
       };
       onAddQuiz(newQuiz);
       alert(`Đã lưu thành công đề kiểm tra: ${newQuiz.title} với mã đề là [${newQuiz.code}]!`);

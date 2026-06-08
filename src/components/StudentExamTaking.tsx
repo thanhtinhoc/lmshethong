@@ -359,7 +359,7 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
       <div className="bg-white rounded-[40px] p-6 sm:p-8 border border-indigo-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <span className="text-xs font-black text-white px-3 py-1 bg-[#4F46E5] rounded-lg uppercase tracking-wider">
-            Đề: {quiz.code} - Lớp {quiz.grade}
+            Môn: {quiz.subject} - Lớp {quiz.grade}
           </span>
           <h2 className="text-3xl font-black text-slate-950 tracking-tight mt-3 leading-snug">{quiz.title}</h2>
           <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-sm text-slate-500 mt-2 font-bold">

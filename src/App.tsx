@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Quiz, StudentSubmission } from "./types";
 import { SAMPLE_QUIZZES, SAMPLE_SUBMISSIONS } from "./sampleData";
-import { School, User, Lock, ArrowRight, ShieldCheck, PlayCircle, Sparkles, HelpCircle, BookOpen, Layers, Info, ChevronRight, Search, Filter } from "lucide-react";
+import { School, User, Lock, ArrowRight, ShieldCheck, PlayCircle, Sparkles, HelpCircle, BookOpen, Layers, Info, ChevronRight, Search, Filter, Trash2 } from "lucide-react";
 import StudentExamTaking from "./components/StudentExamTaking";
 import TeacherDashboard from "./components/TeacherDashboard";
 import AuthModal from "./components/AuthModal";
@@ -650,9 +650,32 @@ export default function App() {
                         </div>
 
                         <div className="shrink-0 flex items-center gap-2.5">
-                          <span className="bg-[#FF6B35] text-white font-mono font-black text-xs px-3 py-1.5 rounded-xl shadow-sm">
-                            MÃ: {quiz.code}
-                          </span>
+                          {authenticatedTeacherEmail && (quiz.teacherEmail === authenticatedTeacherEmail || authenticatedTeacherEmail === "linh0704chatgpt@gmail.com") ? (
+                            <span className="bg-[#FF6B35] text-white font-mono font-black text-xs px-3 py-1.5 rounded-xl shadow-sm">
+                              MÃ: {quiz.code}
+                            </span>
+                          ) : (
+                            <span className="bg-[#0A1231] text-slate-400 font-mono font-bold text-xs px-3 py-1.5 rounded-xl border border-slate-700/50 shadow-inner select-none" title="Mã đề thi được bảo mật bởi giáo viên">
+                              MÃ: ******
+                            </span>
+                          )}
+
+                          {authenticatedTeacherEmail === "linh0704chatgpt@gmail.com" && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn đề ôn tập "${quiz.title}" (Mã: ${quiz.code}) khỏi hệ thống không?`)) {
+                                  handleDeleteQuiz(quiz.id);
+                                }
+                              }}
+                              className="h-9 w-9 bg-red-950/80 border border-red-800 hover:bg-red-800/95 rounded-xl flex items-center justify-center transition-all shadow-sm z-10 cursor-pointer text-red-400 hover:text-white"
+                              title="Xóa đề ôn tập này khỏi hệ thống"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+
                           <div className="h-9 w-9 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-sm">
                             <ChevronRight className="h-5 w-5 text-cyan-400" />
                           </div>
@@ -684,8 +707,12 @@ export default function App() {
         {userRole === "TEACHER" && (
           <div className="bg-slate-50 text-slate-900 rounded-[40px] p-6 sm:p-10 shadow-2xl border border-indigo-150 relative animate-fade-in">
             <TeacherDashboard
-              quizzes={quizzes}
-              submissions={submissions}
+              quizzes={quizzes.filter(q => q.teacherEmail === authenticatedTeacherEmail || (!q.teacherEmail && authenticatedTeacherEmail === "linh0704chatgpt@gmail.com"))}
+              submissions={submissions.filter(s => {
+                const quiz = quizzes.find(item => item.id === s.quizId || item.code === s.quizCode);
+                if (!quiz) return false;
+                return quiz.teacherEmail === authenticatedTeacherEmail || (!quiz.teacherEmail && authenticatedTeacherEmail === "linh0704chatgpt@gmail.com");
+              })}
               onAddQuiz={handleAddQuiz}
               onUpdateQuiz={handleUpdateQuiz}
               onDeleteQuiz={handleDeleteQuiz}

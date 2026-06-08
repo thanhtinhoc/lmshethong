@@ -19,6 +19,7 @@ export interface Quiz {
   questions: Question[];
   durationMinutes?: number; // Time limit in minutes (optional, e.g. 15, 45, 90 mins or undefined for no limit)
   showAnswersAfterCompletion?: boolean; // Show correct answers and explanations after finishing (default is true)
+  teacherEmail?: string; // Teacher's Gmail of the creator
 }
 
 export interface StudentSubmission {
