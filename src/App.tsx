@@ -246,9 +246,15 @@ export default function App() {
   };
 
   // Fast shortcut to input exam codes in demo mode
-  const handleDirectSelectQuiz = (quizCode: string) => {
-    setExamCodeInput(quizCode);
-    setStudentValidationError("");
+  const handleDirectSelectQuiz = (quiz: Quiz) => {
+    const isOwner = authenticatedTeacherEmail && (quiz.teacherEmail === authenticatedTeacherEmail || authenticatedTeacherEmail === "linh0704chatgpt@gmail.com");
+    if (isOwner) {
+      setExamCodeInput(quiz.code);
+      setStudentValidationError("");
+    } else {
+      setExamCodeInput("");
+      setStudentValidationError(`Đề ôn tập "${quiz.title}" được giáo viên bảo mật mã số. Vui lòng hỏi giáo viên của em để có mã đề gồm 6 ký tự.`);
+    }
     // Focus or prepare layout
     const regForm = document.getElementById("student-reg-form");
     if (regForm) {
@@ -624,7 +630,7 @@ export default function App() {
                     filteredQuizzes.map((quiz) => (
                       <div
                         key={quiz.id}
-                        onClick={() => handleDirectSelectQuiz(quiz.code)}
+                        onClick={() => handleDirectSelectQuiz(quiz)}
                         className="p-5 bg-[#0C173F]/75 hover:bg-[#11235F] active:bg-[#081232] border border-[#1E3782] hover:border-[#38bdf8] rounded-3xl flex items-center justify-between gap-4 cursor-pointer transition-all duration-150 group shadow-md"
                       >
                         <div className="space-y-1.5 pr-2">
