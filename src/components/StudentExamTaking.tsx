@@ -18,6 +18,7 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
   const [activeZoomUrl, setActiveZoomUrl] = useState<string | null>(null);
   const [isFinishedLocal, setIsFinishedLocal] = useState<boolean>(false);
   const [quizSubmission, setQuizSubmission] = useState<StudentSubmission | null>(null);
+  const [showValidationError, setShowValidationError] = useState<boolean>(false);
 
   // Store the answers in a mutable ref to prevent stale closures during auto-submission
   const answersRef = useRef(answers);
@@ -117,6 +118,20 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
   };
 
   const handleSubmitQuiz = () => {
+    const unanswered = quiz.questions
+      .map((q, idx) => (answers[q.id] === undefined ? idx + 1 : null))
+      .filter((n): n is number => n !== null);
+
+    if (unanswered.length > 0) {
+      setShowValidationError(true);
+      // Automatically redirect current focus to the first unanswered question
+      const firstUnansweredIdx = quiz.questions.findIndex(q => answers[q.id] === undefined);
+      if (firstUnansweredIdx !== -1) {
+        setCurrentIdx(firstUnansweredIdx);
+      }
+      return;
+    }
+
     // Confirm taking exam
     let correct = 0;
     quiz.questions.forEach(q => {
@@ -153,6 +168,9 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
 
   const totalQuestions = quiz.questions.length;
   const answeredCount = Object.keys(answers).length;
+  const unansweredIndices = quiz.questions
+    .map((q, idx) => (answers[q.id] === undefined ? idx + 1 : null))
+    .filter((n): n is number => n !== null);
 
   if (isFinishedLocal && quizSubmission) {
     // Result review mode (shows correct/incorrect options + large, easily readable letter explanation)
@@ -426,6 +444,8 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
               circleClass = "bg-[#4F46E5] border-[#4F46E5] text-white scale-110 shadow-md ring-4 ring-indigo-100";
             } else if (isAnswered) {
               circleClass = "bg-indigo-100 border-indigo-200 text-[#4F46E5] font-extrabold";
+            } else if (showValidationError) {
+              circleClass = "bg-rose-50 border-rose-300 text-rose-600 font-extrabold animate-pulse ring-2 ring-rose-300/80";
             }
 
             return (
@@ -440,6 +460,32 @@ export default function StudentExamTaking({ quiz, studentName, studentClass, onF
           })}
         </div>
       </div>
+
+      {/* Warning regarding mandatory questions */}
+      {showValidationError && unansweredIndices.length > 0 && (
+        <div className="bg-rose-50 border border-rose-200 rounded-3xl p-5.5 flex items-start gap-4 shadow-sm text-rose-950 animate-pulse">
+          <AlertCircle className="h-6 w-6 text-rose-650 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="font-extrabold text-base text-rose-900 tracking-tight">CẢNH BÁO: CHƯA HOÀN THÀNH BÀI THI</h4>
+            <p className="text-sm font-semibold leading-relaxed text-rose-800">
+              Em chưa hoàn thành hết tất cả câu hỏi trong đề ôn tập này. Để nộp bài, em bắt buộc phải tích chọn đáp án cho tất cả câu hỏi dưới đây.
+            </p>
+            <div className="flex flex-wrap gap-2 items-center mt-3">
+              <span className="text-xs font-black text-rose-800 uppercase tracking-widest mr-1">Các câu chưa làm (nhấp để đến ngay):</span>
+              {unansweredIndices.map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setCurrentIdx(num - 1)}
+                  className="px-3.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 font-extrabold rounded-xl text-xs transition border border-rose-250 hover:border-rose-300 shadow-3xs cursor-pointer"
+                >
+                  Câu {num}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Primary Question Slide Area - Large font, highly readable */}
       <div className="bg-white rounded-[40px] p-6 sm:p-8 border border-indigo-100 shadow-sm relative space-y-6">
