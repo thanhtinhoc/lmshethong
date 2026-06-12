@@ -94,30 +94,44 @@ export default function TeacherDashboard({ quizzes, submissions, onAddQuiz, onUp
   const [validationSuccess, setValidationSuccess] = useState<string>("");
 
   const handleValidateAndSaveApiKey = async (keyToValidate: string) => {
-    if (!keyToValidate.trim()) {
+    const trimmedKey = keyToValidate.trim();
+    if (!trimmedKey) {
       setValidationError("Vui lòng nhập khóa API!");
       return;
     }
+
     setIsValidatingKey(true);
     setValidationError("");
     setValidationSuccess("");
     try {
       const response = await fetch("/api/validate-api-key", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: keyToValidate.trim() }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ apiKey: trimmedKey })
       });
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Khóa API không hợp lệ. Vui lòng kiểm tra lại kết nối.");
+      
+      const responseText = await response.text();
+      let resJson: any = null;
+      try {
+        resJson = JSON.parse(responseText);
+      } catch (e) {
+        // Fallback handled below
       }
-      localStorage.setItem("gemini_user_api_key", keyToValidate.trim());
+
+      if (!response.ok) {
+        const errorMsg = resJson?.error || "API key không hợp lệ hoặc chưa được cấp quyền sử dụng Gemini API.";
+        throw new Error(errorMsg);
+      }
+
+      localStorage.setItem("gemini_user_api_key", trimmedKey);
       localStorage.setItem("gemini_user_api_key_verified", "true");
-      setApiKey(keyToValidate.trim());
+      setApiKey(trimmedKey);
       setIsApiKeyVerified(true);
-      setValidationSuccess("Xác thực thành công! Khóa API Gemini của bạn đã được lưu cấu hình sử dụng lâu dài.");
+      setValidationSuccess("Đã kiểm tra và lưu API key thành công.");
     } catch (err: any) {
-      setValidationError(err.message || "Xác thực thất bại. Vui lòng kiểm tra kỹ khóa API.");
+      setValidationError(err.message || "API key không hợp lệ hoặc chưa được cấp quyền sử dụng Gemini API.");
       setIsApiKeyVerified(false);
       localStorage.removeItem("gemini_user_api_key_verified");
     } finally {
@@ -2098,6 +2112,9 @@ Câu 2: Nội dung câu thứ hai...`}
                 <div className="relative">
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="none"
                     value={tempApiKey}
                     onChange={(e) => setTempApiKey(e.target.value)}
                     className="w-full px-4 py-3.5 bg-slate-50 hover:bg-slate-100 focus:bg-white text-slate-800 font-mono text-sm placeholder-slate-400 border border-slate-200 focus:border-[#4F46E5] outline-none rounded-xl transition"

@@ -239,32 +239,47 @@ app.post("/api/validate-api-key", async (req, res) => {
   try {
     const { apiKey } = req.body;
     const keyToValidate = apiKey || req.headers["x-gemini-api-key"] as string;
-    if (!keyToValidate) {
-      return res.status(400).json({ error: "Thiếu khóa API để xác thực." });
+    const trimmedKey = (keyToValidate || "").trim();
+
+    if (!trimmedKey) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập Gemini API key." });
     }
-    const testAi = new GoogleGenAI({
-      apiKey: keyToValidate,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${trimmedKey}`, {
+      method: "GET"
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let errorMessage = "API key không hợp lệ hoặc chưa được cấp quyền sử dụng Gemini API.";
+      try {
+        const errorJson = JSON.parse(responseText);
+        if (errorJson?.error?.message) {
+          if (errorJson.error.message.includes("API key not valid")) {
+            errorMessage = "Khóa API Gemini không tồn tại hoặc đã bị thu hồi. Vui lòng tạo khóa mới.";
+          } else {
+            errorMessage = `Lỗi từ Google: ${errorJson.error.message}`;
+          }
         }
+      } catch (e) {
+        // Fallback
       }
-    });
-    // Run a tiny test request to validate the key
-    const response = await testAi.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: "Chỉ trả về chữ 'OK' để kiểm tra kết nối.",
-    });
-    
-    if (response && response.text) {
-      return res.json({ success: true, message: "Khóa API hợp lệ!" });
-    } else {
-      throw new Error("Không nhận được phản hồi hợp lệ từ Gemini SDK.");
+      return res.status(401).json({ success: false, error: errorMessage });
     }
+
+    try {
+      JSON.parse(responseText);
+    } catch (e) {
+      return res.status(500).json({ success: false, error: "Không thể phân tích phản hồi từ máy chủ Google API." });
+    }
+
+    return res.status(200).json({ success: true, message: "API key hợp lệ" });
   } catch (error: any) {
     safeLog("Lỗi xác thực API Key", error);
-    return res.status(401).json({ 
-      error: "Khóa API không hợp lệ hoặc không hoạt động: " + (error.message || error)
+    return res.status(500).json({ 
+      success: false,
+      error: "Không thể kết nối hoặc xử lý xác thực: " + (error.message || error)
     });
   }
 });
