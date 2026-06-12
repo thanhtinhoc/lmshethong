@@ -393,6 +393,143 @@ D. 11
     }
   };
 
+  // Word/PDF Document parser helper & state
+  const [parsingStatusText, setParsingStatusText] = useState("");
+
+  const safeParseGeminiJson = (rawText: string) => {
+    let cleaned = rawText.trim();
+    
+    // Remove markdown wrappers ```json and ```
+    const startMatch = cleaned.match(/^```(?:json)?\s*/i);
+    if (startMatch) {
+      cleaned = cleaned.substring(startMatch[0].length);
+    }
+    cleaned = cleaned.replace(/\s*```$/, "").trim();
+
+    try {
+      const result = JSON.parse(cleaned);
+      if (!result.sections) result.sections = [];
+      if (!result.rawFormattedText) result.rawFormattedText = "";
+      return result;
+    } catch (e) {
+      const firstBrace = cleaned.indexOf("{");
+      const lastBrace = cleaned.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          const substringJson = cleaned.substring(firstBrace, lastBrace + 1);
+          const result = JSON.parse(substringJson);
+          if (!result.sections) result.sections = [];
+          if (!result.rawFormattedText) result.rawFormattedText = "";
+          return result;
+        } catch (innerErr) {
+          // Fall back below
+        }
+      }
+      
+      return {
+        success: true,
+        mode: "preserve_uploaded_structure",
+        message: "Gemini trả về chưa đúng JSON, hệ thống đã chuyển sang chế độ văn bản.",
+        sections: [],
+        answerKey: [],
+        scoringGuide: [],
+        rawFormattedText: rawText
+      };
+    }
+  };
+
+  const getFileTextContent = async (file: File): Promise<string> => {
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (fileExtension === "txt") {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          resolve(e.target?.result as string || "");
+        };
+        reader.onerror = () => reject(new Error("Lỗi đọc tệp tin .txt"));
+        reader.readAsText(file, "UTF-8");
+      });
+    }
+
+    if (fileExtension === "docx") {
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(new Error("Lỗi đọc tệp .docx"));
+        reader.readAsArrayBuffer(file);
+      });
+
+      if (!(window as any).mammoth) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js";
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Không thể tải thư viện Mammoth để giải nén DOCX. Hoặc kết nối Internet của bạn không hỗ trợ."));
+          document.head.appendChild(script);
+        });
+      }
+
+      const mammothLib = (window as any).mammoth;
+      if (!mammothLib) {
+        throw new Error("Không thể khởi động thư viện trích xuất văn bản Mammoth.");
+      }
+
+      const result = await mammothLib.extractRawText({ arrayBuffer });
+      return result.value || "";
+    }
+
+    if (fileExtension === "pdf") {
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(new Error("Lỗi đọc tệp .pdf"));
+        reader.readAsArrayBuffer(file);
+      });
+
+      if (!(window as any).pdfjsLib) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+          script.onload = () => {
+            (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            resolve();
+          };
+          script.onerror = () => reject(new Error("Không thể tải bộ phân tích PDF."));
+          document.head.appendChild(script);
+        });
+      }
+
+      const pdfjsLib = (window as any).pdfjsLib;
+      if (!pdfjsLib) {
+        throw new Error("Không thể khởi động thư viện phân tích PDF.");
+      }
+
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+      const pdf = await loadingTask.promise;
+      let extractedText = "";
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item: any) => item.str).join(" ");
+        extractedText += pageText + "\n";
+      }
+
+      if (!extractedText.trim()) {
+        throw new Error("Không đọc được nội dung trong file. Vui lòng thử file .txt, .docx hoặc PDF có text thật.");
+      }
+
+      return extractedText;
+    }
+
+    if (fileExtension === "doc") {
+      throw new Error("Tệp .doc cũ không được hỗ trợ trực tiếp từ trình duyệt. Vui lòng chuyển đổi tệp thành định dạng .docx mới hoặc .txt rồi thử lại.");
+    }
+
+    throw new Error("Định dạng tệp không được hỗ trợ.");
+  };
+
   // Handle local file parsing via backend + Gemini AI
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -416,101 +553,140 @@ D. 11
     }
 
     setIsParsingDoc(true);
+    setParsingStatusText("Đang đọc nội dung file...");
     console.log(`[File Upload] Đang tiến hành đọc tệp: ${file.name}, kích thước: ${file.size} bytes`);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const result = event.target?.result as string;
-        if (!result) {
-          throw new Error("Không thể cấu trúc dữ liệu thô nhị phân từ tệp tin.");
-        }
-        const commaIndex = result.indexOf(",");
-        const base64Data = commaIndex !== -1 ? result.substring(commaIndex + 1) : result;
+      const extractedText = await getFileTextContent(file);
+      
+      if (!extractedText || !extractedText.trim()) {
+        throw new Error("Không đọc được nội dung trong file. Vui lòng thử file .txt, .docx hoặc PDF có text thật.");
+      }
 
-        // AbortController for a client-side timeout of 50 seconds
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          controller.abort();
-          console.log("[File Upload Timeout_tag] Đã hết thời gian chờ phản hồi từ máy chủ (50 giây).");
-        }, 50000);
+      setParsingStatusText("Đang phân tích cấu trúc đề bằng Gemini AI...");
 
-        try {
-          const hMap: Record<string, string> = {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.log("[File Upload Timeout_tag] Đã hết thời gian chờ phản hồi từ máy chủ (50 giây).");
+      }, 50000);
+
+      try {
+        const response = await fetch("/api/gemini-generate", {
+          method: "POST",
+          headers: {
             "Content-Type": "application/json",
-          };
-          if (apiKey) {
-            hMap["x-gemini-api-key"] = apiKey;
-          }
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            apiKey: apiKey,
+            mode: "preserve_uploaded_structure",
+            fileText: extractedText,
+            prompt: `Soạn câu hỏi trắc nghiệm khách quan từ đề thi này: môn ${newSubject}, trình độ lớp ${newGrade}.`
+          }),
+        });
 
-          const response = await fetch("/api/parse-document-questions", {
-            method: "POST",
-            headers: hMap,
-            signal: controller.signal,
-            body: JSON.stringify({
-              fileBase64: base64Data,
-              fileName: file.name,
-              fileMimeType: file.type,
-              subject: newSubject,
-              grade: newGrade,
-              apiKey: apiKey
-            }),
-          });
+        clearTimeout(timeoutId);
 
-          clearTimeout(timeoutId);
+        const responseText = await response.text();
+        let resJson: any = null;
+        try {
+          resJson = JSON.parse(responseText);
+        } catch (je) {}
 
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({ error: "Hệ thống phản hồi không đúng cấu trúc." }));
-            throw new Error(data.error || "Gặp lỗi khi bóc tách thông tin từ tệp.");
-          }
-
-          const res = await response.json();
-          if (res.success && res.data && Array.isArray(res.data)) {
-            const parsedQuestions = res.data.map((q: any, index: number) => ({
-              id: "parsed_q_" + Date.now() + "_" + index,
-              questionText: q.questionText,
-              options: q.options,
-              correctIndex: q.correctIndex,
-              explanation: q.explanation || "",
-              image: ""
-            }));
-
-            setDraftQuestions((prev) => [...prev, ...parsedQuestions]);
-            
-            if (res.isFallback) {
-              setDocSuccessMessage(`⚠️ Đã tự động dùng bộ lọc thô dự phòng do máy chủ AI bận. Đã bóc tách thành công ${parsedQuestions.length} câu hỏi từ tệp "${file.name}"!`);
-            } else {
-              setDocSuccessMessage(`✨ Đã dùng Gemini AI bóc tách và phân loại thành công ${parsedQuestions.length} câu hỏi trắc nghiệm từ tệp "${file.name}"!`);
-            }
-          } else {
-            throw new Error("Không nhận diện được nội dung cấu trúc câu hỏi khả dụng từ file.");
-          }
-        } catch (fetchErr: any) {
-          clearTimeout(timeoutId);
-          console.log("[Parser Fetch Fail_tag]:", fetchErr);
-          if (fetchErr.name === "AbortError") {
-            setDocErrorMessage("Thời gian xử lý tệp quá lâu (Vượt quá 50 giây). Vui lòng thử lại hoặc rút gọn tệp tin.");
-          } else {
-            setDocErrorMessage(fetchErr.message || "Đã xảy ra lỗi khi gửi yêu cầu phân tích tệp.");
-          }
-        } finally {
-          setIsParsingDoc(false);
-          fileInput.value = "";
+        if (!response.ok) {
+          const errData = resJson?.error || "Gặp lỗi khi bóc tách thông tin từ tệp.";
+          throw new Error(errData);
         }
-      };
 
-      reader.onerror = (readErr) => {
-        console.log("[FileReader Err_tag]:", readErr);
-        setDocErrorMessage("Lỗi trong quá trình đọc dữ liệu tệp từ trình duyệt.");
+        const textOutput = resJson?.text;
+        if (!textOutput) {
+          throw new Error("Không tìm thấy phản hồi từ Gemini API.");
+        }
+
+        const parsedResult = safeParseGeminiJson(textOutput);
+
+        // check structure validity
+        const isStructureValid = 
+          (parsedResult.sections && Array.isArray(parsedResult.sections)) || 
+          (parsedResult.rawFormattedText && parsedResult.rawFormattedText.trim().length > 0);
+
+        if (!isStructureValid) {
+          throw new Error("Hệ thống phản hồi không đúng cấu trúc.");
+        }
+
+        const parsedQuestions: any[] = [];
+        
+        if (parsedResult.sections && Array.isArray(parsedResult.sections)) {
+          parsedResult.sections.forEach((section: any, sIdx: number) => {
+            if (section.questions && Array.isArray(section.questions)) {
+              section.questions.forEach((q: any, qIdx: number) => {
+                let opts: string[] = [];
+                if (Array.isArray(q.options)) {
+                  opts = q.options.map((opt: any) => {
+                    if (typeof opt === 'object' && opt !== null) {
+                      return opt.text || opt.label || "";
+                    }
+                    return String(opt);
+                  });
+                }
+                while (opts.length < 4) {
+                  opts.push(`Lựa chọn ${String.fromCharCode(65 + opts.length)}`);
+                }
+                if (opts.length > 4) {
+                  opts = opts.slice(0, 4);
+                }
+
+                let correctIdx = 0;
+                if (q.answer) {
+                  const ansStr = String(q.answer).toUpperCase().trim();
+                  if (ansStr.includes("A") || ansStr === "0") correctIdx = 0;
+                  else if (ansStr.includes("B") || ansStr === "1") correctIdx = 1;
+                  else if (ansStr.includes("C") || ansStr === "2") correctIdx = 2;
+                  else if (ansStr.includes("D") || ansStr === "3") correctIdx = 3;
+                }
+
+                parsedQuestions.push({
+                  id: `parsed_q_${Date.now()}_s${sIdx}_q${qIdx}`,
+                  questionText: q.questionText || `Câu trắc nghiệm ${q.questionNumber || qIdx + 1}`,
+                  options: opts,
+                  correctIndex: correctIdx,
+                  explanation: q.note || q.explanation || "Giải thích đề thi thô được bóc tách tự động.",
+                  image: ""
+                });
+              });
+            }
+          });
+        }
+
+        if (parsedQuestions.length > 0) {
+          setDraftQuestions((prev) => [...prev, ...parsedQuestions]);
+          setDocSuccessMessage(`✨ Đã dùng Gemini AI bóc tách và phân loại thành công ${parsedQuestions.length} câu hỏi trắc nghiệm từ tệp "${file.name}"!`);
+        } else if (parsedResult.rawFormattedText) {
+          setDocSuccessMessage(`Đã đọc và chuyển đổi văn bản của tệp "${file.name}" sang định dạng thô.`);
+        } else {
+          throw new Error("Không nhận diện được nội dung câu hỏi trắc nghiệm hợp lệ nào.");
+        }
+
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        console.log("[Parser Fetch Fail_tag]:", fetchErr);
+        if (fetchErr.name === "AbortError") {
+          setDocErrorMessage("Thời gian xử lý tệp quá lâu (Vượt quá 50 giây). Vui lòng thử lại hoặc rút gọn tệp tin.");
+        } else {
+          setDocErrorMessage(fetchErr.message || "Đã xảy ra lỗi khi gửi yêu cầu phân tích tệp.");
+        }
+      } finally {
         setIsParsingDoc(false);
+        setParsingStatusText("");
         fileInput.value = "";
-      };
+      }
 
-      reader.readAsDataURL(file);
     } catch (err: any) {
       console.log("[File Handler Outer Fail_tag]:", err);
-      setDocErrorMessage(err.message || "Lỗi tải tệp tin và chuẩn hóa dữ liệu.");
+      setDocErrorMessage(err.message || "Không đọc được nội dung trong file. Vui lòng thử file .txt, .docx hoặc PDF có text thật.");
       setIsParsingDoc(false);
+      setParsingStatusText("");
       fileInput.value = "";
     }
   };
@@ -1761,7 +1937,7 @@ Câu 2: Nội dung câu thứ hai...`}
                 {isParsingDoc && (
                   <div className="flex items-center justify-center gap-2.5 py-2.5 bg-purple-950/50 border border-purple-900/60 rounded-xl text-xs font-black text-purple-300 animate-pulse">
                     <span className="h-4 w-4 border-2 border-purple-500 border-t-purple-300 rounded-full animate-spin"></span>
-                    <span>Gemini AI đang bóc tách nội dung thô và phân loại trắc nghiệm...</span>
+                    <span>{parsingStatusText || "Gemini AI đang bóc tách nội dung thô và phân loại trắc nghiệm..."}</span>
                   </div>
                 )}
               </div>
