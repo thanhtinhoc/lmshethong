@@ -189,6 +189,8 @@ export default function TeacherDashboard({ quizzes, submissions, onAddQuiz, onUp
   const [isParsingDoc, setIsParsingDoc] = useState(false);
   const [docErrorMessage, setDocErrorMessage] = useState("");
   const [docSuccessMessage, setDocSuccessMessage] = useState("");
+  const [rawExtractedText, setRawExtractedText] = useState("");
+  const [parsingModelUsed, setParsingModelUsed] = useState("");
   const [showSamplePreview, setShowSamplePreview] = useState(false);
 
   // Custom confirmation modal states for running in sandboxed web views safely
@@ -538,6 +540,8 @@ D. 11
     const fileInput = e.target;
     setDocErrorMessage("");
     setDocSuccessMessage("");
+    setRawExtractedText("");
+    setParsingModelUsed("");
     setAiErrorMessage("");
     setAiSuccessMessage("");
 
@@ -659,11 +663,17 @@ D. 11
           });
         }
 
+        setRawExtractedText(parsedResult.rawFormattedText || "");
+        const usedModelName = resJson?.modelUsed || "";
+        setParsingModelUsed(usedModelName);
+
+        const modelNote = usedModelName ? ` (Model: ${usedModelName})` : "";
+
         if (parsedQuestions.length > 0) {
           setDraftQuestions((prev) => [...prev, ...parsedQuestions]);
-          setDocSuccessMessage(`✨ Đã dùng Gemini AI bóc tách và phân loại thành công ${parsedQuestions.length} câu hỏi trắc nghiệm từ tệp "${file.name}"!`);
+          setDocSuccessMessage(`✨ Đã dùng Gemini AI${modelNote} bóc tách và phân loại thành công ${parsedQuestions.length} câu hỏi trắc nghiệm từ tệp "${file.name}"!`);
         } else if (parsedResult.rawFormattedText) {
-          setDocSuccessMessage(`Đã đọc và chuyển đổi văn bản của tệp "${file.name}" sang định dạng thô.`);
+          setDocSuccessMessage(`✨ Đã đọc và chuyển đổi văn bản của tệp "${file.name}" sang định dạng thô${modelNote}.`);
         } else {
           throw new Error("Không nhận diện được nội dung câu hỏi trắc nghiệm hợp lệ nào.");
         }
@@ -1915,7 +1925,27 @@ Câu 2: Nội dung câu thứ hai...`}
                 {docSuccessMessage && (
                   <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/25 text-emerald-200 text-xs rounded-xl font-bold flex items-start gap-2">
                     <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-400" />
-                    <span>{docSuccessMessage}</span>
+                    <div className="space-y-1">
+                      <div>{docSuccessMessage}</div>
+                      {parsingModelUsed && (
+                        <div className="text-[10px] text-emerald-400 font-medium">
+                          Mô hình xử lý thành công: <strong className="font-semibold text-emerald-300">{parsingModelUsed}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {rawExtractedText && (
+                  <div className="p-3.5 bg-indigo-950/30 border border-indigo-900/40 rounded-xl space-y-2 text-xs">
+                    <div className="flex justify-between items-center text-indigo-300 font-bold border-b border-indigo-900/40 pb-1.5">
+                      <span>Văn bản thô đã bóc tách:</span>
+                    </div>
+                    <textarea
+                      readOnly
+                      className="w-full h-32 bg-slate-950/80 text-indigo-200 p-2.5 rounded-lg border border-indigo-950/50 outline-none font-mono text-[11px] leading-relaxed resize-none cursor-text scrollbar-thin"
+                      value={rawExtractedText}
+                    />
                   </div>
                 )}
 

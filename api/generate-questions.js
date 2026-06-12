@@ -1,3 +1,5 @@
+import { getAvailableGenerateContentModels } from "./gemini-generate.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Phương thức không được hỗ trợ. Vui lòng sử dụng POST." });
@@ -17,7 +19,6 @@ export default async function handler(req, res) {
     }
 
     const numQuestions = Math.min(Math.max(Number(quantity || 5), 1), 10);
-    const DEFAULT_MODEL = "gemini-1.5-flash";
 
     const prompt = `Soạn đề ôn tập trắc nghiệm môn ${subject}, chủ đề: "${topic}", trình độ cho học sinh lớp ${grade || 'mọi cấp độ'}.
 Yêu cầu soạn đúng ${numQuestions} câu hỏi trắc nghiệm, mỗi câu gồm 4 đáp án lựa chọn (A, B, C, D).
@@ -33,78 +34,112 @@ Chỉ xuất ra đúng mảng JSON, không thêm bất cứ văn bản giải th
 
     const systemInstruction = "Bạn là giáo viên giàu kinh nghiệm tại Việt Nam chuyên soạn các đề thi trắc nghiệm khách quan chuẩn sư phạm. Bạn chỉ xuất thông tin dưới dạng mảng JSON chứa các câu hỏi theo cấu trúc được yêu cầu. Không thêm bớt bất kỳ mô tả nào ngoài mảng JSON.";
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${trimmedKey}`;
+    const candidateModels = await getAvailableGenerateContentModels(trimmedKey);
+    const triedModels = [];
+    let lastError = "";
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
-        },
-        systemInstruction: {
-          parts: [
-            {
-              text: systemInstruction
-            }
-          ]
-        }
-      })
-    });
-
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      let errorMessage = "Không thể sinh câu hỏi bằng AI.";
+    for (const model of candidateModels) {
+      triedModels.push(model);
       try {
-        const errorJson = JSON.parse(responseText);
-        if (errorJson?.error?.message) {
-          errorMessage = `Lỗi từ Gemini: ${errorJson.error.message}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+        
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: prompt
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.5,
+              responseMimeType: "application/json"
+            },
+            systemInstruction: {
+              parts: [
+                {
+                  text: systemInstruction
+                }
+              ]
+            }
+          })
+        });
+
+        const responseText = await response.text();
+
+        if (!response.ok) {
+          let errorMessage = "Không thể sinh câu hỏi bằng AI.";
+          try {
+            const errorJson = JSON.parse(responseText);
+            if (errorJson?.error?.message) {
+              errorMessage = errorJson.error.message;
+            }
+          } catch (e) {
+            errorMessage = responseText || `Status ${response.status}`;
+          }
+
+          const isModelNotFoundError = 
+            errorMessage.toLowerCase().includes("not found") || 
+            errorMessage.toLowerCase().includes("not supported") || 
+            errorMessage.toLowerCase().includes("models/");
+
+          if (isModelNotFoundError && triedModels.length < candidateModels.length) {
+            console.warn(`Model ${model} không khả dụng khi sinh câu hỏi, cố gắng chuyển sang model khác...`);
+            lastError = errorMessage;
+            continue;
+          } else {
+            return res.status(response.status || 400).json({ success: false, error: `Lỗi từ Gemini: ${errorMessage}`, triedModels });
+          }
         }
-      } catch (e) {}
-      return res.status(response.status || 400).json({ success: false, error: errorMessage });
+
+        const resData = JSON.parse(responseText);
+        const textOutput = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!textOutput) {
+          return res.status(500).json({ success: false, error: "Không nhận được phản hồi nội dung từ Gemini API." });
+        }
+
+        let cleaned = textOutput.trim();
+        const startMatch = cleaned.match(/^```(?:json)?\s*/i);
+        if (startMatch) {
+          cleaned = cleaned.substring(startMatch[0].length);
+        }
+        cleaned = cleaned.replace(/\s*```$/, "");
+        const firstBracket = cleaned.indexOf("[");
+        const lastBracket = cleaned.lastIndexOf("]");
+        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+          cleaned = cleaned.substring(firstBracket, lastBracket + 1);
+        }
+
+        let quizData;
+        try {
+          quizData = JSON.parse(cleaned);
+        } catch (e) {
+          return res.status(500).json({ success: false, error: "Phản hồi từ AI không đúng cấu trúc JSON mong đợi. Vui lòng bấm thử lại." });
+        }
+
+        return res.status(200).json({ success: true, data: quizData, modelUsed: model });
+
+      } catch (err) {
+        lastError = err.message || err;
+        if (triedModels.length < candidateModels.length) {
+          continue;
+        }
+      }
     }
 
-    const resData = JSON.parse(responseText);
-    const textOutput = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!textOutput) {
-      return res.status(500).json({ success: false, error: "Không nhận được phản hồi nội dung từ Gemini API." });
-    }
-
-    // Clean JSON helpers
-    let cleaned = textOutput.trim();
-    const startMatch = cleaned.match(/^```(?:json)?\s*/i);
-    if (startMatch) {
-      cleaned = cleaned.substring(startMatch[0].length);
-    }
-    cleaned = cleaned.replace(/\s*```$/, "");
-    const firstBracket = cleaned.indexOf("[");
-    const lastBracket = cleaned.lastIndexOf("]");
-    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      cleaned = cleaned.substring(firstBracket, lastBracket + 1);
-    }
-
-    let quizData;
-    try {
-      quizData = JSON.parse(cleaned);
-    } catch (e) {
-      // Return raw parsed heuristic or try cleaning again
-      return res.status(500).json({ success: false, error: "Phản hồi từ AI không đúng cấu trúc JSON mong đợi. Vui lòng bấm thử lại." });
-    }
-
-    return res.status(200).json({ success: true, data: quizData });
+    return res.status(500).json({
+      success: false,
+      error: `Không tìm thấy model Gemini phù hợp với API key này. Chi tiết lỗi cuối cùng: ${lastError}`,
+      triedModels
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message || "Lỗi máy chủ nội bộ." });
   }

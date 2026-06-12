@@ -1,5 +1,53 @@
+export async function getAvailableGenerateContentModels(apiKey) {
+  const fallbackList = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"];
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) {
+      return fallbackList;
+    }
+    const data = await response.json();
+    if (!data || !Array.isArray(data.models)) {
+      return fallbackList;
+    }
+
+    // Filter models supporting generateContent
+    const filtered = data.models
+      .filter((m) => m && Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
+      .map((m) => {
+        const name = m.name || "";
+        return name.startsWith("models/") ? name.substring("models/".length) : name;
+      })
+      .filter(Boolean);
+
+    if (filtered.length === 0) {
+      return fallbackList;
+    }
+
+    // Sort to prioritize gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro
+    const priority = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"];
+    const ordered = [];
+    
+    for (const p of priority) {
+      if (filtered.includes(p)) {
+        ordered.push(p);
+      }
+    }
+
+    // Add remaining models
+    for (const f of filtered) {
+      if (!ordered.includes(f)) {
+        ordered.push(f);
+      }
+    }
+
+    return ordered.length > 0 ? ordered : fallbackList;
+  } catch (e) {
+    return fallbackList;
+  }
+}
+
 export default async function handler(req, res) {
-  // Enforce POST method
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Phương thức không được hỗ trợ. Vui lòng sử dụng POST." });
   }
@@ -11,9 +59,6 @@ export default async function handler(req, res) {
     if (!trimmedKey) {
       return res.status(401).json({ success: false, error: "Vui lòng cấu hình Gemini API Key." });
     }
-
-    const DEFAULT_MODEL = "gemini-1.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${trimmedKey}`;
 
     let fullPrompt = "";
     let useJsonMode = false;
@@ -101,44 +146,94 @@ LƯU Ý QUAN TRỌNG:
 
     if (useJsonMode) {
       requestBody.generationConfig = {
+        temperature: 0.2,
         responseMimeType: "application/json"
       };
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody)
+    // Load available models and try them
+    const candidateModels = await getAvailableGenerateContentModels(trimmedKey);
+    const triedModels = [];
+    let lastError = "";
+
+    for (const model of candidateModels) {
+      triedModels.push(model);
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        const responseText = await response.text();
+
+        if (!response.ok) {
+          let errorMessage = `Lỗi từ server ${model}`;
+          try {
+            const errorJson = JSON.parse(responseText);
+            if (errorJson?.error?.message) {
+              errorMessage = errorJson.error.message;
+            }
+          } catch (e) {
+            errorMessage = responseText || `Status ${response.status}`;
+          }
+
+          const isModelNotFoundError = 
+            errorMessage.toLowerCase().includes("not found") || 
+            errorMessage.toLowerCase().includes("not supported") || 
+            errorMessage.toLowerCase().includes("models/");
+
+          if (isModelNotFoundError && triedModels.length < candidateModels.length) {
+            // Log & continue retry
+            console.warn(`Model ${model} không hợp lệ hoặc không có quyền truy cập, chuyển sang model tiếp theo...`);
+            lastError = errorMessage;
+            continue;
+          } else {
+            // Not a model-not-found error, or we ran out of models
+            return res.status(response.status || 400).json({ 
+              success: false, 
+              error: `Lỗi từ Gemini: ${errorMessage}`,
+              triedModels 
+            });
+          }
+        }
+
+        // Response is OK
+        let parsedResponse;
+        try {
+          parsedResponse = JSON.parse(responseText);
+        } catch (e) {
+          return res.status(500).json({ success: false, error: "Không thể phân tích phản hồi gốc là JSON từ máy chủ Google API." });
+        }
+
+        const textOutput = parsedResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!textOutput) {
+          return res.status(500).json({ success: false, error: "Không tìm thấy nội dung phản hồi từ mô hình AI." });
+        }
+
+        return res.status(200).json({
+          success: true,
+          modelUsed: model,
+          text: textOutput,
+          data: parsedResponse
+        });
+      } catch (err) {
+        lastError = err.message || err;
+        if (triedModels.length < candidateModels.length) {
+          continue;
+        }
+      }
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: `Không tìm thấy model Gemini phù hợp với API key này. Chi tiết lỗi cuối cùng: ${lastError}`,
+      triedModels
     });
 
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      let errorMessage = "Không thể sinh nội dung từ Gemini API.";
-      try {
-        const errorJson = JSON.parse(responseText);
-        if (errorJson?.error?.message) {
-          errorMessage = `Lỗi từ Gemini: ${errorJson.error.message}`;
-        }
-      } catch (e) {}
-      return res.status(response.status || 400).json({ success: false, error: errorMessage });
-    }
-
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(responseText);
-    } catch (e) {
-      return res.status(500).json({ success: false, error: "Không thể phân tích phản hồi gốc là JSON từ máy chủ Google API." });
-    }
-
-    const textOutput = parsedResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textOutput) {
-      return res.status(500).json({ success: false, error: "Không tìm thấy nội dung phản hồi từ mô hình AI." });
-    }
-
-    return res.status(200).json({ success: true, text: textOutput, data: parsedResponse });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message || "Lỗi xử lý nội bộ hệ thống." });
   }
